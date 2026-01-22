@@ -1,0 +1,21 @@
+import type { Metadata } from "next";
+import "./globals.css";
+
+export const metadata: Metadata = {
+  title: "Trump Bets - Polymarket Tracker",
+  description: "Track Trump-related prediction markets on Polymarket. Find contrarian bets and high ROI opportunities.",
+};
+
+export default function RootLayout({
+  children,
+}: Readonly<{
+  children: React.ReactNode;
+}>) {
+  return (
+    <html lang="en">
+      <body className="antialiased">
+        {children}
+      </body>
+    </html>
+  );
+}
