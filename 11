@@ -1,0 +1,100 @@
+import { NextResponse } from "next/server";
+import {
+  fetchTrumpMarkets,
+  findTrumpBetOpportunities,
+  getTopContrarianBets,
+  getTrumpSayMarkets,
+  getExpiringTrumpMarkets,
+  type TrumpBetFilters,
+  type TrumpBetCategory,
+} from "@/lib/polymarket";
+
+export async function GET(request: Request) {
+  const { searchParams } = new URL(request.url);
+  const mode = searchParams.get("mode") || "opportunities";
+  const categories = searchParams.get("categories")?.split(",") as TrumpBetCategory[] | undefined;
+  const minRoi = searchParams.get("minRoi") ? parseFloat(searchParams.get("minRoi")!) : undefined;
+  const maxYesPrice = searchParams.get("maxYesPrice") ? parseFloat(searchParams.get("maxYesPrice")!) : undefined;
+  const minLiquidity = searchParams.get("minLiquidity") ? parseFloat(searchParams.get("minLiquidity")!) : undefined;
+  const onlyContrarian = searchParams.get("onlyContrarian") === "true";
+  const expiringWithinDays = searchParams.get("expiringWithinDays") ? parseInt(searchParams.get("expiringWithinDays")!) : undefined;
+  const limit = searchParams.get("limit") ? parseInt(searchParams.get("limit")!) : 20;
+
+  try {
+    const startTime = Date.now();
+    let result;
+
+    switch (mode) {
+      case "markets":
+        const markets = await fetchTrumpMarkets({ limit });
+        result = { type: "markets", count: markets.length, markets };
+        break;
+
+      case "contrarian":
+        const contrarianBets = await getTopContrarianBets(limit);
+        result = {
+          type: "contrarian", count: contrarianBets.length, opportunities: contrarianBets,
+          summary: {
+            totalMarkets: contrarianBets.length,
+            avgRoiIfYes: contrarianBets.length > 0 ? Math.round(contrarianBets.reduce((sum, o) => sum + o.roiIfYes, 0) / contrarianBets.length) : 0,
+            avgRoiIfNo: contrarianBets.length > 0 ? Math.round(contrarianBets.reduce((sum, o) => sum + o.roiIfNo, 0) / contrarianBets.length) : 0,
+            contrarianCount: contrarianBets.filter(o => o.isContrarian).length,
+            expiringCount: contrarianBets.filter(o => o.isExpiringSoon).length,
+          },
+        };
+        break;
+
+      case "say":
+        const sayMarkets = await getTrumpSayMarkets();
+        const saySlice = sayMarkets.slice(0, limit);
+        result = {
+          type: "say", count: saySlice.length, opportunities: saySlice,
+          summary: {
+            totalMarkets: saySlice.length,
+            avgRoiIfYes: saySlice.length > 0 ? Math.round(saySlice.reduce((sum, o) => sum + o.roiIfYes, 0) / saySlice.length) : 0,
+            avgRoiIfNo: saySlice.length > 0 ? Math.round(saySlice.reduce((sum, o) => sum + o.roiIfNo, 0) / saySlice.length) : 0,
+            contrarianCount: saySlice.filter(o => o.isContrarian).length,
+            expiringCount: saySlice.filter(o => o.isExpiringSoon).length,
+          },
+        };
+        break;
+
+      case "expiring":
+        const expiringMarkets = await getExpiringTrumpMarkets(expiringWithinDays || 7);
+        const expiringSlice = expiringMarkets.slice(0, limit);
+        result = {
+          type: "expiring", count: expiringSlice.length, opportunities: expiringSlice,
+          summary: {
+            totalMarkets: expiringSlice.length,
+            avgRoiIfYes: expiringSlice.length > 0 ? Math.round(expiringSlice.reduce((sum, o) => sum + o.roiIfYes, 0) / expiringSlice.length) : 0,
+            avgRoiIfNo: expiringSlice.length > 0 ? Math.round(expiringSlice.reduce((sum, o) => sum + o.roiIfNo, 0) / expiringSlice.length) : 0,
+            contrarianCount: expiringSlice.filter(o => o.isContrarian).length,
+            expiringCount: expiringSlice.length,
+          },
+        };
+        break;
+
+      case "opportunities":
+      default:
+        const filters: TrumpBetFilters = { categories, minRoi, maxYesPrice, minLiquidity, onlyContrarian, expiringWithinDays };
+        const opportunities = await findTrumpBetOpportunities(filters);
+        const sortedOpps = opportunities.sort((a, b) => Math.max(b.roiIfYes, b.roiIfNo) - Math.max(a.roiIfYes, a.roiIfNo)).slice(0, limit);
+        result = {
+          type: "opportunities", count: sortedOpps.length, totalFound: opportunities.length, filters, opportunities: sortedOpps,
+          summary: {
+            totalMarkets: sortedOpps.length,
+            avgRoiIfYes: sortedOpps.length > 0 ? Math.round(sortedOpps.reduce((s, o) => s + o.roiIfYes, 0) / sortedOpps.length) : 0,
+            avgRoiIfNo: sortedOpps.length > 0 ? Math.round(sortedOpps.reduce((s, o) => s + o.roiIfNo, 0) / sortedOpps.length) : 0,
+            contrarianCount: sortedOpps.filter(o => o.isContrarian).length,
+            expiringCount: sortedOpps.filter(o => o.isExpiringSoon).length,
+          },
+        };
+        break;
+    }
+
+    return NextResponse.json({ success: true, ...result, meta: { processingTimeMs: Date.now() - startTime, timestamp: new Date().toISOString() } });
+  } catch (error) {
+    console.error("Polymarket API error:", error);
+    return NextResponse.json({ success: false, error: "Failed to fetch Polymarket data", details: error instanceof Error ? error.message : String(error) }, { status: 500 });
+  }
+}
